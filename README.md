@@ -99,6 +99,23 @@ Point Claude Code at it (no cache env vars needed — cc-router handles them):
 export ANTHROPIC_BASE_URL="http://127.0.0.1:8787"
 ```
 
+## Auth & Pro/Max subscription
+
+Auth passes through by default. Crucially, **a Pro/Max subscription works through
+this proxy**: with `ANTHROPIC_BASE_URL` pointed at cc-router, Claude Code still
+sends its subscription OAuth token (`Authorization: Bearer sk-ant-oat01…`) — it
+does *not* demand an API key. So one endpoint can serve both:
+
+- **Anthropic route** (`auth.mode: passthrough`) forwards the OAuth token
+  unchanged to real `api.anthropic.com` → runs on your subscription, no API billing.
+- **Other routes** (`auth.mode: bearer_env`) **overwrite** `Authorization` with the
+  provider key and drop `x-api-key`, so the subscription token is never sent to a
+  third party.
+
+> The subscription token only ever reaches real Anthropic, byte-unchanged — it is
+> not used to power any other provider. Confirm acceptance with one Opus round-trip
+> through the passthrough route.
+
 ## Debug / echo mode
 
 Set `CC_ROUTER_DEBUG=1` (or `"debug": true` in config) and cc-router logs which
