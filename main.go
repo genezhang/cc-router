@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -82,8 +83,24 @@ func main() {
 		proxy.ServeHTTP(w, r.WithContext(ctx))
 	})
 
+	warnIfExposed(cfg.Listen)
 	log.Printf("cc-router listening on %s", cfg.Listen)
 	log.Fatal(http.ListenAndServe(cfg.Listen, mux))
+}
+
+// warnIfExposed flags a non-loopback bind: cc-router has no client
+// authentication, so anyone able to reach the port can spend the operator's
+// subscription / provider keys and route requests through their credentials.
+func warnIfExposed(listen string) {
+	host, _, err := net.SplitHostPort(listen)
+	if err != nil {
+		return
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" || !isLocalHost(host) {
+		log.Printf("cc-router: WARNING listening on non-loopback %q with NO client auth — "+
+			"anyone who can reach this port can use your subscription and provider keys. "+
+			"Bind to 127.0.0.1 unless this network is fully trusted.", listen)
+	}
 }
 
 // resolve reads the request body, picks a route by model, and applies the

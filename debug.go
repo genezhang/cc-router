@@ -27,10 +27,12 @@ func newDebugCapture(dir string) *debugCapture {
 	if dir == "" {
 		dir = "capture"
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		log.Printf("cc-router: debug: cannot create %s: %v", dir, err)
 	}
-	log.Printf("cc-router: DEBUG mode on — auth logged, bodies dumped to %s/", dir)
+	log.Printf("cc-router: DEBUG mode ON — dumping FULL request bodies (prompts, code, "+
+		"metadata PII) as plaintext to %s/ and logging which credential each request "+
+		"carries. Use on localhost only; delete %s/ when done.", dir, dir)
 	return &debugCapture{dir: dir}
 }
 
@@ -55,7 +57,7 @@ func (d *debugCapture) capture(r *http.Request, res resolved) {
 
 func (d *debugCapture) write(name string, body []byte) {
 	p := filepath.Join(d.dir, name)
-	if err := os.WriteFile(p, body, 0o644); err != nil {
+	if err := os.WriteFile(p, body, 0o600); err != nil {
 		log.Printf("cc-router: debug: write %s: %v", p, err)
 		return
 	}

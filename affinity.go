@@ -35,9 +35,25 @@ func expandHeaders(h map[string]string, doc map[string]any) map[string]string {
 // by the header-apply step rather than sent blank.
 func expandTemplate(v string, doc map[string]any) string {
 	if strings.Contains(v, "{{session_id}}") {
-		v = strings.ReplaceAll(v, "{{session_id}}", sessionID(doc))
+		v = strings.ReplaceAll(v, "{{session_id}}", sanitizeHeaderToken(sessionID(doc)))
 	}
 	return v
+}
+
+// sanitizeHeaderToken makes a body-derived value safe to place in an HTTP
+// header: it keeps only visible ASCII (no CR/LF or control bytes, which would
+// otherwise enable header/request-splitting injection from a crafted request
+// body) and bounds the length. A legitimate session_id is a UUID, so this is a
+// no-op for real traffic and only bites adversarial input.
+func sanitizeHeaderToken(s string) string {
+	const max = 128
+	var b strings.Builder
+	for i := 0; i < len(s) && b.Len() < max; i++ {
+		if c := s[i]; c > 0x20 && c < 0x7f {
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }
 
 // sessionID extracts the per-session identifier Claude Code embeds in

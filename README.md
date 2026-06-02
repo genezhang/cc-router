@@ -58,7 +58,7 @@ JSON, first-match-wins. See [`config.example.json`](config.example.json).
 |---|---|
 | `match` | glob patterns (`path.Match`) tested against the request's `model`; `*` is a catch-all (also matches bodyless calls) |
 | `upstream` | base URL; the incoming path (`/v1/messages`, …) is appended |
-| `auth.mode` | `passthrough` (forward the client's `x-api-key`/Bearer) or `bearer_env` (inject `Authorization: Bearer $<bearer_env>`, drop `x-api-key`) |
+| `auth.mode` | `passthrough` (forward the client's `x-api-key`/Bearer — **Anthropic upstreams only**), `bearer_env` (strip the client's auth, then inject `Authorization: Bearer $<bearer_env>`), or `none` (strip the client's auth, send nothing — e.g. a local box) |
 | `model_rewrite` | replaces `body.model` (e.g. `claude-3-5-haiku` → a Fireworks model id) |
 | `set_headers` | headers added to the outbound request, **only if the client didn't already send them** (set-if-absent — see below) |
 | `transforms` | named body mutators, applied in order |
@@ -198,12 +198,38 @@ In practice prefix stability is the bigger lever.
   llama.cpp have `/v1/messages` shims) or route that rule to a translating
   gateway (e.g. Bifrost). Don't hand-roll Anthropic↔OpenAI SSE translation here.
 
+## Security model
+
+cc-router sits in the request path holding your Anthropic subscription token and
+provider API keys, and sees every prompt and `metadata.user_id`. The design
+keeps that from leaking; the key invariants are **enforced at config load** (it
+refuses to start on a violation) rather than left to convention:
+
+- **The client credential only ever reaches Anthropic.** `passthrough` forwards
+  the inbound `Authorization`/`x-api-key` unchanged, so it is allowed *only* to
+  `*.anthropic.com`. Any third-party/local upstream must use `bearer_env` or
+  `none`, both of which **strip the client's auth first** — so your subscription
+  OAuth token can never ride along to Fireworks et al., even if the provider key
+  env var is unset (you'd get an unauthenticated request, never a leak).
+- **No cleartext credentials.** Non-loopback upstreams must be `https`; plaintext
+  `http` is allowed only to a `localhost` box.
+- **No header injection from request bodies.** Values templated from the body
+  (e.g. `{{session_id}}`) are sanitized to visible ASCII and length-bounded
+  before being placed in a header.
+- **No client auth on the listener.** cc-router authenticates *to* upstreams, not
+  callers. Bind to `127.0.0.1` (the default); it warns loudly on a non-loopback
+  bind because anyone who can reach the port could spend your keys.
+- **Debug capture is a plaintext PII sink.** When enabled it writes full request
+  bodies (prompts, code, metadata) to `capture/` (created `0700`, files `0600`).
+  It is off by default — keep it to localhost and delete `capture/` when done.
+
 ## Notes & caveats
 
 - **Unofficial.** Relies on Claude Code's current header/body behavior; a future
   version could change it.
-- **Run on localhost / a trusted network** — it can hold upstream keys and sits
-  in the request path.
+- **Single-tenant by design.** No cross-user isolation — run your own instance on
+  localhost / a trusted network. Multi-tenant routing is a job for a full gateway
+  (e.g. Bifrost), not this.
 
 ## License
 
