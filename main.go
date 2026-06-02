@@ -10,17 +10,19 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"os"
+	"strings"
 )
 
 type ctxKey int
 
 const routeCtxKey ctxKey = 0
 
-// resolved is the routing decision plus the (possibly transformed) request body,
-// handed from the outer handler to the ReverseProxy via the request context.
+// resolved is the routing decision plus bodies, handed from the outer handler
+// to the ReverseProxy (and to debug/echo) via the request context.
 type resolved struct {
 	route *Route
-	body  []byte
+	raw   []byte // inbound body as received from Claude Code
+	body  []byte // outbound body (== raw when nothing was mutated)
 }
 
 func main() {
@@ -28,6 +30,11 @@ func main() {
 	cfg, err := LoadConfig(cfgPath)
 	if err != nil {
 		log.Fatalf("cc-router: config: %v", err)
+	}
+
+	var dbg *debugCapture
+	if cfg.Debug || truthy(os.Getenv("CC_ROUTER_DEBUG")) {
+		dbg = newDebugCapture(os.Getenv("CC_ROUTER_CAPTURE_DIR"))
 	}
 
 	proxy := &httputil.ReverseProxy{
@@ -40,11 +47,10 @@ func main() {
 			pr.Out.Host = target.Host
 			pr.SetXForwarded()
 
-			// Send the bytes we resolved (original or transformed).
 			pr.Out.Body = io.NopCloser(bytes.NewReader(res.body))
 			pr.Out.ContentLength = int64(len(res.body))
 
-			res.route.applyAuth(pr.Out)
+			res.route.applyAuth(pr.Out.Header)
 			for k, v := range res.route.SetHeaders {
 				pr.Out.Header.Set(k, v)
 			}
@@ -57,6 +63,13 @@ func main() {
 		res, ok := resolve(cfg, r)
 		if !ok {
 			http.Error(w, "cc-router: no route for model", http.StatusNotFound)
+			return
+		}
+		if dbg != nil {
+			dbg.capture(r, res)
+		}
+		if res.route.IsEcho() {
+			writeEcho(w, r, res)
 			return
 		}
 		ctx := context.WithValue(r.Context(), routeCtxKey, res)
@@ -96,7 +109,7 @@ func resolve(cfg *Config, r *http.Request) (resolved, bool) {
 			}
 		}
 	}
-	return resolved{route: route, body: body}, true
+	return resolved{route: route, raw: raw, body: body}, true
 }
 
 // extractModel pulls just the top-level "model" field; returns "" if absent.
@@ -113,4 +126,13 @@ func getenv(k, def string) string {
 		return v
 	}
 	return def
+}
+
+// truthy interprets an env flag; "", "0", "false", "no", "off" are false.
+func truthy(s string) bool {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "0", "false", "no", "off":
+		return false
+	}
+	return true
 }

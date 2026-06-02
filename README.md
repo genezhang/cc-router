@@ -85,6 +85,36 @@ Point Claude Code at it (no cache env vars needed — cc-router handles them):
 export ANTHROPIC_BASE_URL="http://127.0.0.1:8787"
 ```
 
+## Debug / echo mode
+
+Set `CC_ROUTER_DEBUG=1` (or `"debug": true` in config) and cc-router logs which
+credential each request carries (masked) and dumps the inbound/outbound bodies to
+`capture/`. Point a route at `"upstream": "echo"` and it **responds with what it
+resolved** instead of forwarding — no provider or key needed.
+
+```bash
+go build && CC_ROUTER_CONFIG=config.echo.json ./cc-router
+# then point Claude Code at it and send one message
+export ANTHROPIC_BASE_URL="http://127.0.0.1:8787"
+```
+
+A single request answers three things at once:
+
+1. **What credential Claude Code sends through a custom base URL** — the log line
+   shows `Authorization: Bearer sk-ant-oat…` (Pro/Max subscription token) vs.
+   `x-api-key: sk-ant-api…` (API billing) vs. `(none)`.
+2. **The attribution-block shape** — run once with `CLAUDE_CODE_ATTRIBUTION_HEADER`
+   unset and once `=0`, then `diff capture/*.in.json` to see exactly what the
+   attribution injects (the fixture needed to finish `strip_attribution`).
+3. **That transforms produce the right bytes** — the echo response and
+   `capture/*.out.json` show the rewritten model and stripped markers.
+
+> Claude Code will show a parse error for the echo response (it isn't a real
+> model reply) — that's expected; read the log and the `capture/` files.
+
+`config.example.json` is the real routing config; `config.echo.json` is the
+debug/echo harness.
+
 ## Maximizing cache hits: two axes
 
 Hit rate has two independent levers:

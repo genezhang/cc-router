@@ -1,0 +1,16 @@
+{
+  "listen": "127.0.0.1:8787",
+  "debug": true,
+  "routes": [
+    {
+      "match": ["claude-sonnet-*", "claude-*haiku*"],
+      "upstream": "echo",
+      "model_rewrite": "accounts/fireworks/models/glm-4p6",
+      "transforms": ["strip_cache_control", "strip_attribution"]
+    },
+    {
+      "match": ["*"],
+      "upstream": "echo"
+    }
+  ]
+}

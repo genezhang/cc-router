@@ -5,18 +5,20 @@ import (
 	"net/http"
 	"os"
 	"path"
+	"strings"
 )
 
 // Config is the whole gateway config, loaded once at boot from a JSON file.
 type Config struct {
 	Listen string  `json:"listen"`
+	Debug  bool    `json:"debug"` // log auth + dump bodies (also enabled by CC_ROUTER_DEBUG)
 	Routes []Route `json:"routes"`
 }
 
 // Route is one first-match-wins rule: how to match, where to send, what to change.
 type Route struct {
 	Match        []string          `json:"match"`         // glob patterns against the request's model
-	Upstream     string            `json:"upstream"`      // base URL to forward to; incoming path is appended
+	Upstream     string            `json:"upstream"`      // base URL to forward to; "echo" responds instead of forwarding
 	Auth         Auth              `json:"auth"`          // how to authenticate to the upstream
 	ModelRewrite string            `json:"model_rewrite"` // if set, replaces body.model
 	SetHeaders   map[string]string `json:"set_headers"`   // headers to set on the outbound request (e.g. x-session-affinity)
@@ -61,12 +63,15 @@ func (c *Config) Match(model string) *Route {
 	return nil
 }
 
-// applyAuth sets upstream credentials on the outbound request per the route's mode.
-func (r *Route) applyAuth(out *http.Request) {
+// IsEcho reports whether this route should be echoed instead of forwarded.
+func (r *Route) IsEcho() bool { return strings.EqualFold(r.Upstream, "echo") }
+
+// applyAuth sets upstream credentials on the outbound headers per the route's mode.
+func (r *Route) applyAuth(h http.Header) {
 	if r.Auth.Mode == "bearer_env" {
 		if tok := os.Getenv(r.Auth.BearerEnv); tok != "" {
-			out.Header.Set("Authorization", "Bearer "+tok)
-			out.Header.Del("X-Api-Key")
+			h.Set("Authorization", "Bearer "+tok)
+			h.Del("X-Api-Key")
 		}
 	}
 	// "passthrough" (default): leave the client's inbound auth headers untouched.

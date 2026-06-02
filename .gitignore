@@ -8,3 +8,6 @@
 config.json
 .env
 *.local
+
+# debug capture dumps
+/capture/
