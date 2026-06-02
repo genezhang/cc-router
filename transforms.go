@@ -1,5 +1,7 @@
 package main
 
+import "strings"
+
 // transforms maps a config name to a body mutator. Each operates in place on
 // the decoded JSON document. Mutators must be pure (no I/O) and tolerant of
 // missing or oddly-typed fields.
@@ -18,15 +20,41 @@ func stripCacheControl(doc map[string]any) {
 	})
 }
 
-// stripAttribution replicates CLAUDE_CODE_ATTRIBUTION_HEADER=0 by removing the
-// attribution block Claude Code injects into message content (issue URL, CLI
-// version, git SHA), which would otherwise vary the cacheable prefix.
+// billingHeaderPrefix marks the attribution block Claude Code injects as the
+// FIRST system block when CLAUDE_CODE_ATTRIBUTION_HEADER is not 0, e.g.:
 //
-// TODO(fixture): the exact JSON shape is not yet confirmed. Capture a real
-// request body with attribution ON vs. =0, diff them, and implement against
-// that fixture. Stubbed as a no-op until then so routing stays correct.
+//	x-anthropic-billing-header: cc_version=2.1.160.bca; cc_entrypoint=cli; cch=45c9a;
+//
+// The cch hash changes every request, so this block poisons the cacheable
+// prefix on every turn. (Verified by capturing the same session with the header
+// on vs =0: only this block differs, and cch varied 45c9a -> b0712 turn-to-turn.)
+const billingHeaderPrefix = "x-anthropic-billing-header:"
+
+// stripAttribution replicates CLAUDE_CODE_ATTRIBUTION_HEADER=0 by removing that
+// billing-header system block, restoring a stable prefix.
 func stripAttribution(doc map[string]any) {
-	// no-op pending fixture
+	sys, ok := doc["system"].([]any)
+	if !ok {
+		return
+	}
+	kept := make([]any, 0, len(sys))
+	for _, el := range sys {
+		if !isBillingHeaderBlock(el) {
+			kept = append(kept, el)
+		}
+	}
+	doc["system"] = kept
+}
+
+// isBillingHeaderBlock reports whether a system element is the billing-header
+// attribution block.
+func isBillingHeaderBlock(el any) bool {
+	m, ok := el.(map[string]any)
+	if !ok {
+		return false
+	}
+	text, _ := m["text"].(string)
+	return strings.HasPrefix(strings.TrimSpace(text), billingHeaderPrefix)
 }
 
 // walk visits every nested map in a decoded JSON document — objects within

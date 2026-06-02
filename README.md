@@ -71,7 +71,21 @@ bytes untouched — the Anthropic passthrough is byte-identical.
 | Name | Replicates | Status |
 |---|---|---|
 | `strip_cache_control` | `DISABLE_PROMPT_CACHING=1` — recursively deletes every `cache_control` key | ✅ working |
-| `strip_attribution` | `CLAUDE_CODE_ATTRIBUTION_HEADER=0` — removes the injected attribution block | ⏳ **stubbed** — pending a captured request fixture (see code TODO) |
+| `strip_attribution` | `CLAUDE_CODE_ATTRIBUTION_HEADER=0` — removes the billing-header system block | ✅ working |
+
+**What `strip_attribution` actually removes** (captured from a live Claude Code
+session): with the header on, Claude Code prepends a block as **`system[0]`**:
+
+```
+x-anthropic-billing-header: cc_version=2.1.160.bca; cc_entrypoint=cli; cch=45c9a;
+```
+
+The `cch` hash **changes every request** (`45c9a` → `b0712` on consecutive turns
+of one session), and because it sits at the very front of the prompt it
+invalidates the whole cacheable prefix on every turn. `strip_attribution` drops
+any `system` element whose text starts with `x-anthropic-billing-header:`,
+reproducing exactly what `CLAUDE_CODE_ATTRIBUTION_HEADER=0` does — which is why
+it's the single biggest cache-hit lever.
 
 ## Run
 
@@ -128,8 +142,7 @@ In practice prefix stability is the bigger lever.
 
 ## Status & roadmap
 
-- ✅ model routing, model rewrite, `strip_cache_control`, auth passthrough/inject, header injection, SSE passthrough.
-- ⏳ `strip_attribution` — implement against a real captured fixture.
+- ✅ model routing, model rewrite, `strip_cache_control`, `strip_attribution`, auth passthrough/inject, header injection, SSE passthrough, debug/echo mode.
 - 🔭 **local OpenAI-only box (Qwen):** this gateway does **no protocol
   translation** — it assumes every upstream speaks Anthropic `/v1/messages`
   (Anthropic native + Fireworks Anthropic-compat both do). For an OpenAI-only
