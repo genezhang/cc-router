@@ -12,7 +12,7 @@
       "auth": { "mode": "bearer_env", "bearer_env": "FIREWORKS_API_KEY" },
       "model_rewrite": "accounts/fireworks/models/glm-4p6",
       "set_headers": { "x-session-affinity": "{{session_id}}" },
-      "transforms": ["strip_cache_control", "strip_attribution"]
+      "transforms": ["strip_cache_control", "strip_attribution", "strip_metadata"]
     },
     {
       "match": ["*"],

@@ -63,6 +63,31 @@ func TestStripAttributionAbsent(t *testing.T) {
 	}
 }
 
+func TestStripMetadata(t *testing.T) {
+	doc := map[string]any{
+		"model": "x",
+		"metadata": map[string]any{
+			"user_id": `{"device_id":"d1","account_uuid":"a1","session_id":"s1"}`,
+		},
+		"messages": []any{},
+	}
+	stripMetadata(doc)
+	if _, ok := doc["metadata"]; ok {
+		t.Fatal("metadata survived")
+	}
+	if doc["model"] != "x" {
+		t.Fatalf("unrelated field mutated: %v", doc["model"])
+	}
+}
+
+func TestStripMetadataAbsent(t *testing.T) {
+	doc := map[string]any{"model": "x"}
+	stripMetadata(doc) // must not panic when metadata is missing
+	if doc["model"] != "x" {
+		t.Fatal("document mutated when no metadata present")
+	}
+}
+
 // hasKey reports whether key appears in any nested map of the document.
 func hasKey(v any, key string) bool {
 	found := false

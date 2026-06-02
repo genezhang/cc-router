@@ -103,6 +103,7 @@ cache then thrashes between all those unrelated prefixes.
 |---|---|---|
 | `strip_cache_control` | `DISABLE_PROMPT_CACHING=1` — recursively deletes every `cache_control` key | ✅ working |
 | `strip_attribution` | `CLAUDE_CODE_ATTRIBUTION_HEADER=0` — removes the billing-header system block | ✅ working |
+| `strip_metadata` | (PII minimization) — drops the `metadata` object (`user_id` = device/account/session ids) so third-party upstreams don't receive identifiers they don't need; session affinity still works since `session_id` is read into the header first | ✅ working |
 
 **What `strip_attribution` actually removes** (captured from a live Claude Code
 session): with the header on, Claude Code prepends a block as **`system[0]`**:

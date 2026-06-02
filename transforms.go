@@ -8,6 +8,19 @@ import "strings"
 var transforms = map[string]func(map[string]any){
 	"strip_cache_control": stripCacheControl,
 	"strip_attribution":   stripAttribution,
+	"strip_metadata":      stripMetadata,
+}
+
+// stripMetadata removes the top-level "metadata" object. On Claude Code requests
+// that carries metadata.user_id — a JSON blob of {device_id, account_uuid,
+// session_id} identifying the user's machine and account. A third-party upstream
+// (Fireworks, a local box) doesn't need it, so dropping it minimizes the PII
+// sent off to providers. session_id, the only field cc-router itself uses, is
+// lifted into the x-session-affinity header before transforms run, so affinity
+// is unaffected. Use this only on non-Anthropic routes — Anthropic uses user_id
+// for abuse signals.
+func stripMetadata(doc map[string]any) {
+	delete(doc, "metadata")
 }
 
 // stripCacheControl removes every "cache_control" key anywhere in the document,
