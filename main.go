@@ -20,9 +20,10 @@ const routeCtxKey ctxKey = 0
 // resolved is the routing decision plus bodies, handed from the outer handler
 // to the ReverseProxy (and to debug/echo) via the request context.
 type resolved struct {
-	route *Route
-	raw   []byte // inbound body as received from Claude Code
-	body  []byte // outbound body (== raw when nothing was mutated)
+	route   *Route
+	raw     []byte            // inbound body as received from Claude Code
+	body    []byte            // outbound body (== raw when nothing was mutated)
+	headers map[string]string // effective set_headers, {{token}}s expanded
 }
 
 func main() {
@@ -51,8 +52,13 @@ func main() {
 			pr.Out.ContentLength = int64(len(res.body))
 
 			res.route.applyAuth(pr.Out.Header)
-			for k, v := range res.route.SetHeaders {
-				pr.Out.Header.Set(k, v)
+			// set_headers fills gaps but never clobbers a header the client
+			// already sent — so an explicit x-session-affinity from
+			// ANTHROPIC_CUSTOM_HEADERS wins over the auto-derived one.
+			for k, v := range res.headers {
+				if v != "" && pr.Out.Header.Get(k) == "" {
+					pr.Out.Header.Set(k, v)
+				}
 			}
 		},
 		ErrorLog: log.Default(),
@@ -93,9 +99,13 @@ func resolve(cfg *Config, r *http.Request) (resolved, bool) {
 	}
 
 	body := raw
-	if route.ModelRewrite != "" || len(route.Transforms) > 0 {
+	headers := route.SetHeaders
+	if route.ModelRewrite != "" || len(route.Transforms) > 0 || hasTemplate(route.SetHeaders) {
 		var doc map[string]any
 		if err := json.Unmarshal(raw, &doc); err == nil {
+			if h := expandHeaders(route.SetHeaders, doc); h != nil {
+				headers = h
+			}
 			if route.ModelRewrite != "" {
 				doc["model"] = route.ModelRewrite
 			}
@@ -109,7 +119,7 @@ func resolve(cfg *Config, r *http.Request) (resolved, bool) {
 			}
 		}
 	}
-	return resolved{route: route, raw: raw, body: body}, true
+	return resolved{route: route, raw: raw, body: body, headers: headers}, true
 }
 
 // extractModel pulls just the top-level "model" field; returns "" if absent.

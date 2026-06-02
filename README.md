@@ -45,7 +45,7 @@ JSON, first-match-wins. See [`config.example.json`](config.example.json).
       "upstream": "https://api.fireworks.ai/inference",
       "auth": { "mode": "bearer_env", "bearer_env": "FIREWORKS_API_KEY" },
       "model_rewrite": "accounts/fireworks/models/glm-4p6",
-      "set_headers": { "x-session-affinity": "cc-router-personal" },
+      "set_headers": { "x-session-affinity": "{{session_id}}" },
       "transforms": ["strip_cache_control", "strip_attribution"] },
 
     { "match": ["*"], "upstream": "https://api.anthropic.com",
@@ -60,11 +60,42 @@ JSON, first-match-wins. See [`config.example.json`](config.example.json).
 | `upstream` | base URL; the incoming path (`/v1/messages`, …) is appended |
 | `auth.mode` | `passthrough` (forward the client's `x-api-key`/Bearer) or `bearer_env` (inject `Authorization: Bearer $<bearer_env>`, drop `x-api-key`) |
 | `model_rewrite` | replaces `body.model` (e.g. `claude-3-5-haiku` → a Fireworks model id) |
-| `set_headers` | headers set on the outbound request |
+| `set_headers` | headers added to the outbound request, **only if the client didn't already send them** (set-if-absent — see below) |
 | `transforms` | named body mutators, applied in order |
 
 A route with **no** `model_rewrite` and **no** `transforms` forwards the original
 bytes untouched — the Anthropic passthrough is byte-identical.
+
+#### `set_headers` is set-if-absent, and supports `{{session_id}}`
+
+cc-router never clobbers a header the client already sent: `set_headers` only
+fills a header that's **missing**. So if you ever set one client-side (e.g. via
+`ANTHROPIC_CUSTOM_HEADERS`), that value wins; otherwise cc-router supplies it.
+(Auth is the exception — `bearer_env` always overwrites `Authorization`, so a
+provider key can't leak past it.)
+
+Header values may contain the placeholder **`{{session_id}}`**, which cc-router
+fills from the request body — no client-side configuration. It reads the
+per-session id Claude Code embeds in `metadata.user_id` (itself a JSON string:
+`{"device_id":…,"account_uuid":…,"session_id":…}`). The value is constant for
+every turn of one CC session — main loop, subagents, and Haiku background calls
+all share it — and changes only on a new session.
+
+That makes it the right key for `x-session-affinity`: a cache-aware backend
+(Fireworks) treats the header as an opaque sticky key — *same value → same
+backend*. Pinning per session means all the turns that share a growing cacheable
+prefix land on one warm backend, while a different session gets a different key
+and spreads across backends. A single static value would instead funnel *every*
+session — and every concurrent CC agent you're running — onto one backend, whose
+cache then thrashes between all those unrelated prefixes.
+
+> Why per-session and not per-directory? The cwd would group sessions of the
+> same project, but it only exists as free text inside the system prompt (fragile
+> to parse), and prompt-cache TTLs are short (~5 min) — so cross-session warmth
+> rarely survives anyway. `session_id` is structured, foolproof, and captures the
+> warmth that actually exists: an active session's rapid back-and-forth. If a
+> request carries no `metadata.user_id` (bodyless preflights, the `quota` probe),
+> the token resolves to empty and no affinity header is sent.
 
 ### Transforms
 
@@ -152,7 +183,7 @@ Hit rate has two independent levers:
 
 | Axis | Lever | Effect |
 |---|---|---|
-| **Which backend** | `x-session-affinity` (`set_headers`) | routes to a server that *might* have a warm cache |
+| **Which backend** | `x-session-affinity: {{session_id}}` (`set_headers`) | pins each CC session to one server that *might* have a warm cache |
 | **Whether the prefix matches** | `strip_attribution` + `strip_cache_control` | stabilize the cacheable prefix the upstream sees |
 
 In practice prefix stability is the bigger lever.

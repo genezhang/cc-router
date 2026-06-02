@@ -108,8 +108,10 @@ func maskToken(v string) string {
 func writeEcho(w http.ResponseWriter, r *http.Request, res resolved) {
 	out := r.Header.Clone()
 	res.route.applyAuth(out)
-	for k, v := range res.route.SetHeaders {
-		out.Set(k, v)
+	for k, v := range res.headers {
+		if v != "" && out.Get(k) == "" {
+			out.Set(k, v)
+		}
 	}
 
 	var bodyDoc any
@@ -118,14 +120,15 @@ func writeEcho(w http.ResponseWriter, r *http.Request, res resolved) {
 	}
 
 	payload := map[string]any{
-		"cc_router":        "echo",
-		"matched":          res.route.Match,
-		"model_rewrite":    res.route.ModelRewrite,
-		"transforms":       res.route.Transforms,
-		"inbound_auth":     redactAuth(r.Header),
-		"outbound_auth":    redactAuth(out),
-		"set_headers":      res.route.SetHeaders,
-		"transformed_body": bodyDoc,
+		"cc_router":          "echo",
+		"matched":            res.route.Match,
+		"model_rewrite":      res.route.ModelRewrite,
+		"transforms":         res.route.Transforms,
+		"inbound_auth":       redactAuth(r.Header),
+		"outbound_auth":      redactAuth(out),
+		"set_headers":        res.headers,
+		"x_session_affinity": out.Get("X-Session-Affinity"),
+		"transformed_body":   bodyDoc,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
