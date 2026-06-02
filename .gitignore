@@ -1,0 +1,10 @@
+# compiled binary and common build outputs
+/cc-router
+*.exe
+/dist/
+/out/
+
+# local config / secrets
+config.json
+.env
+*.local
