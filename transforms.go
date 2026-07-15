@@ -9,6 +9,7 @@ var transforms = map[string]func(map[string]any){
 	"strip_cache_control": stripCacheControl,
 	"strip_attribution":   stripAttribution,
 	"strip_metadata":      stripMetadata,
+	"strip_thinking":      stripThinking,
 }
 
 // stripMetadata removes the top-level "metadata" object. On Claude Code requests
@@ -68,6 +69,42 @@ func isBillingHeaderBlock(el any) bool {
 	}
 	text, _ := m["text"].(string)
 	return strings.HasPrefix(strings.TrimSpace(text), billingHeaderPrefix)
+}
+
+// stripThinking removes "thinking" and "redacted_thinking" content blocks from
+// every message. Anthropic returns these blocks (with cryptographic signatures)
+// when extended thinking is on, and Claude Code stores them in the transcript.
+// On a later request, they are sent back as input - but Anthropic rejects any
+// whose signature no longer validates (in case of switching models to a different
+// provider). So we need to stip them. But here our goal is to reduce the context
+// by removing thinking blocks, as they constitute the largest portion of the
+// context window.
+func stripThinking(doc map[string]any) {
+	msgs, ok := doc["messages"].([]any)
+	if !ok {
+		return
+	}
+	for _, m := range msgs {
+		mm, ok := m.(map[string]any)
+		if !ok {
+			continue
+		}
+		content, ok := mm["content"].([]any)
+		if !ok {
+			continue // string content, or absent - nothing to filter
+		}
+		filtered := make([]any, 0, len(content))
+		for _, blk := range content {
+			if b, ok := blk.(map[string]any); ok {
+				t, _ := b["type"].(string)
+ 				if t == "thinking" || t == "redacted_thinking" {
+					continue
+				}
+			}
+			filtered = append(filtered, blk)
+		}
+		mm["content"] = filtered
+	}
 }
 
 // walk visits every nested map in a decoded JSON document — objects within

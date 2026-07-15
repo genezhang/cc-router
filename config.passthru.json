@@ -1,0 +1,11 @@
+{
+  "listen": "127.0.0.1:8787",
+  "routes": [
+    {
+      "match": ["*"],
+      "upstream": "https://api.anthropic.com",
+      "auth": { "mode": "passthrough" },
+      "transforms": ["strip_thinking"]
+    }
+  ]
+}
