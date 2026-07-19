@@ -5,10 +5,16 @@ at it once; it routes each request to a different upstream based on the model, a
 applies per-route request tweaks so each provider gets the body *it* wants.
 
 ```
-                         ┌─ claude-opus-*      → Anthropic (native, untouched)
+                                     ┌─ claude-opus-*, claude-fable-*  → Anthropic (native, untouched - see note)
 Claude Code ─(BASE_URL)─▶ cc-router ─┼─ claude-*haiku*/sonnet → Fireworks GLM (+ affinity, stripped markers)
-                         └─ qwen*             → local box (future)
+                                     └─ qwen*             → local box (future)
 ```
+
+**Note**: Real use experiences revealed an incompatibility between `fireworks.ai` and `Anthropic` thinking blocks. Claude Code
+verifies the signature on a thinking block, which does not work when switching models in a session from fireworks.ai back to Anthropic.
+So we have enhanced cc-router with the `"strip_thinking"` transform. It eliminated the 400 error in Claude Code. Furthermore,
+stats shows that thinking blocks are 40+% of the context in a long-horizon coding session. "strip_thinking" helps
+reduce the session context size, although the saved tokens are mostly cached reads.
 
 ## Why a gateway instead of env vars
 
@@ -38,20 +44,32 @@ JSON, first-match-wins. See [`config.example.json`](config.example.json).
 {
   "listen": "127.0.0.1:8787",
   "routes": [
-    { "match": ["claude-opus-*"], "upstream": "https://api.anthropic.com",
-      "auth": { "mode": "passthrough" } },
-
-    { "match": ["claude-sonnet-*", "claude-*haiku*"],
+    {
+      "match": ["claude-opus-*", "claude-fable-*"],
+      "upstream": "https://api.anthropic.com",
+      "auth": { "mode": "passthrough" },
+      "transforms": ["strip_thinking"]
+    },
+    {
+      "match": ["claude-sonnet-*", "claude-*haiku*"],
       "upstream": "https://api.fireworks.ai/inference",
       "auth": { "mode": "bearer_env", "bearer_env": "FIREWORKS_API_KEY" },
       "model_rewrite": "accounts/fireworks/models/glm-4p6",
       "set_headers": { "x-session-affinity": "{{session_id}}" },
-      "transforms": ["strip_cache_control", "strip_attribution"] },
-
-    { "match": ["*"], "upstream": "https://api.anthropic.com",
-      "auth": { "mode": "passthrough" } }
+      "transforms": ["strip_cache_control", "strip_attribution", "strip_thinking"]
+    },
+    {
+      "match": ["*"], "upstream": "https://api.anthropic.com",
+      "auth": { "mode": "passthrough" },
+      "transforms": ["strip_thinking"]
+    }
   ]
 }
+```
+
+**Tip**: if you need to accept routing from other local machines, change "listen" to the following:
+```
+  "listen": "0.0.0.0:8787",
 ```
 
 | Field | Meaning |
@@ -104,6 +122,7 @@ cache then thrashes between all those unrelated prefixes.
 | `strip_cache_control` | `DISABLE_PROMPT_CACHING=1` — recursively deletes every `cache_control` key | ✅ working |
 | `strip_attribution` | `CLAUDE_CODE_ATTRIBUTION_HEADER=0` — removes the billing-header system block | ✅ working |
 | `strip_metadata` | (PII minimization) — drops the `metadata` object (`user_id` = device/account/session ids) so third-party upstreams don't receive identifiers they don't need; session affinity still works since `session_id` is read into the header first | ✅ working |
+| `strip_thinking` | removes "thinking"/"redacted_thinking" blocks from the requests, they stay in Claude Code's context | ✅ working |
 
 **What `strip_attribution` actually removes** (captured from a live Claude Code
 session): with the header on, Claude Code prepends a block as **`system[0]`**:
@@ -118,6 +137,29 @@ invalidates the whole cacheable prefix on every turn. `strip_attribution` drops
 any `system` element whose text starts with `x-anthropic-billing-header:`,
 reproducing exactly what `CLAUDE_CODE_ATTRIBUTION_HEADER=0` does — which is why
 it's the single biggest cache-hit lever.
+
+### To strip thinking blocks only
+
+If you want to experiment stripping thinking blocks to save some tokens, you can use config in `config.passthru.json`:
+```
+{
+  "listen": "0.0.0.0:8787",
+  "routes": [
+    {
+      "match": ["*"],
+      "upstream": "https://api.anthropic.com",
+      "auth": { "mode": "passthrough" },
+      "transforms": ["strip_thinking"]
+    }
+  ]
+}
+```
+
+It seems to work. One caveat is that it seems to mess up Claude Code's context % calculations. When choosing a model, add `[1m]`
+explicitly so it will help to correct the calculations to some degree. Other than that, it seems to work without visible negative
+impact. If you look at the quality test results of Anthropic models with and without thinking, they differ quite negligibly.
+And we are only removing the thinking blocks in requests, not disabling thinking. How much do we save the tokens? Hard to tell
+without accurate benchmarking.
 
 ## Run
 

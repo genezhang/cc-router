@@ -2,22 +2,24 @@
   "listen": "127.0.0.1:8787",
   "routes": [
     {
-      "match": ["claude-opus-*"],
+      "match": ["claude-opus-*", "claude-fable-*"],
       "upstream": "https://api.anthropic.com",
-      "auth": { "mode": "passthrough" }
+      "auth": { "mode": "passthrough" },
+      "transforms": ["strip_thinking"]
     },
     {
       "match": ["claude-sonnet-*", "claude-*haiku*"],
       "upstream": "https://api.fireworks.ai/inference",
       "auth": { "mode": "bearer_env", "bearer_env": "FIREWORKS_API_KEY" },
-      "model_rewrite": "accounts/fireworks/models/glm-4p6",
+      "model_rewrite": "accounts/fireworks/models/glm-5p2",
       "set_headers": { "x-session-affinity": "{{session_id}}" },
-      "transforms": ["strip_cache_control", "strip_attribution", "strip_metadata"]
+      "transforms": ["strip_cache_control", "strip_attribution", "strip_metadata", "strip_thinking"]
     },
     {
       "match": ["*"],
       "upstream": "https://api.anthropic.com",
-      "auth": { "mode": "passthrough" }
+      "auth": { "mode": "passthrough" },
+      "transforms": ["strip_thinking"]
     }
   ]
 }
